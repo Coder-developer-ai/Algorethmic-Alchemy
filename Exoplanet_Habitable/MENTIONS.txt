@@ -1,0 +1,6 @@
+The dataset used in this project was constructed using publicly available data from the NASA Exoplanet Archive.
+Specifically, data were collected from the Planetary Systems table, which provides fundamental physical and orbital properties of confirmed exoplanets and their host stars, 
+and the Atmospheric Spectroscopy table, which contains observational spectroscopic measurements related to exoplanet atmospheres. 
+These two datasets were merged using the common exoplanet identifier (pl_name) to create a unified dataset containing both planetary characteristics and atmospheric information. 
+Following the integration process, additional derived features were computed using established mathematical formulas and domain-specific criteria, including the Earth Similarity Index (ESI), habitability category, planet type, and inferred atmospheric composition.
+ These engineered features were added to enrich the dataset and serve as target labels and predictive variables for the machine learning models developed in this project.
