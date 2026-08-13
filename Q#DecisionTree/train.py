@@ -369,6 +369,11 @@ def main():
 
     print("\nTraining complete.")
 
+import base64
+
+encoded_string = "bWFkZSBieSB2cnVzaGFiaC5zIHN3cw=="
+print(base64.b64decode(encoded_string).decode('utf-8'))
+
 
 if __name__ == "__main__":
     main()
