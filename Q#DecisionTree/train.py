@@ -12,9 +12,10 @@ from qdk import qsharp
 
 
 SHOTS = 50
-MAX_DEPTH = 20
-MAX_SIMULATION_DEPTH = 20
-ITERATIONS = 5
+DEPTH = 10
+ITERATIONS = 20
+LEARNING_RATE = 0.15
+PERTURBATION = 0.10
 RANDOM_STATE = 42
 
 
@@ -74,18 +75,13 @@ def make_qsharp_array(values):
     ) + "]"
 
 
-def run_quantum_tree(
-    features,
-    angles,
-    depth,
-    shots=SHOTS
-):
+def run_quantum_tree(features, angles):
     feature_string = make_qsharp_array(features)
     angle_string = make_qsharp_array(angles)
 
     expression = (
         f"QuantumTree.QuantumTree("
-        f"{depth}, "
+        f"{DEPTH}, "
         f"{feature_string}, "
         f"{angle_string}"
         f")"
@@ -93,7 +89,7 @@ def run_quantum_tree(
 
     results = qsharp.run(
         expression,
-        shots=shots
+        shots=SHOTS
     )
 
     ones = sum(
@@ -102,40 +98,21 @@ def run_quantum_tree(
         if str(result) == "One"
     )
 
-    return ones / shots
+    return ones / SHOTS
 
 
-def create_angles(depth, seed):
-    rng = np.random.default_rng(seed)
-
-    return rng.uniform(
-        -math.pi,
-        math.pi,
-        depth
-    )
-
-
-def predict(
-    X,
-    depth,
-    angles
-):
+def predict(X, angles):
     probabilities = []
 
     for sample in X:
         probability = run_quantum_tree(
             sample,
-            angles,
-            depth
+            angles
         )
 
-        probabilities.append(
-            probability
-        )
+        probabilities.append(probability)
 
-    probabilities = np.asarray(
-        probabilities
-    )
+    probabilities = np.asarray(probabilities)
 
     predictions = (
         probabilities >= 0.5
@@ -144,122 +121,124 @@ def predict(
     return predictions, probabilities
 
 
-def train_depth(
-    X_train,
-    y_train,
-    X_validation,
-    y_validation,
-    depth
-):
-    best_angles = None
-    best_loss = float("inf")
+def calculate_loss(y, probabilities):
+    probabilities = np.clip(
+        probabilities,
+        1e-7,
+        1 - 1e-7
+    )
+
+    return log_loss(
+        y,
+        probabilities,
+        labels=[0, 1]
+    )
+
+
+def evaluate_angles(X, y, angles):
+    _, probabilities = predict(
+        X,
+        angles
+    )
+
+    return calculate_loss(
+        y,
+        probabilities
+    )
+
+
+def train(X_train, y_train):
+    rng = np.random.default_rng(
+        RANDOM_STATE
+    )
+
+    angles = rng.uniform(
+        -math.pi,
+        math.pi,
+        DEPTH
+    )
+
+    best_angles = angles.copy()
+
+    best_loss = evaluate_angles(
+        X_train,
+        y_train,
+        angles
+    )
+
+    print("TRAINING")
+    
+
+    print(
+        f"Initial loss: {best_loss:.4f}"
+    )
 
     for iteration in range(ITERATIONS):
 
-        angles = create_angles(
-            depth,
-            RANDOM_STATE + depth * 100 + iteration
+        delta = rng.choice(
+            [-1.0, 1.0],
+            size=DEPTH
         )
 
-        _, probabilities = predict(
+        plus_angles = (
+            angles
+            + PERTURBATION * delta
+        )
+
+        minus_angles = (
+            angles
+            - PERTURBATION * delta
+        )
+
+        plus_loss = evaluate_angles(
             X_train,
-            depth,
+            y_train,
+            plus_angles
+        )
+
+        minus_loss = evaluate_angles(
+            X_train,
+            y_train,
+            minus_angles
+        )
+
+        gradient = (
+            (plus_loss - minus_loss)
+            / (2.0 * PERTURBATION)
+        ) * delta
+
+        angles = (
+            angles
+            - LEARNING_RATE * gradient
+        )
+
+        angles = np.clip(
+            angles,
+            -math.pi,
+            math.pi
+        )
+
+        current_loss = evaluate_angles(
+            X_train,
+            y_train,
             angles
         )
 
-        loss = log_loss(
-            y_train,
-            probabilities,
-            labels=[0, 1]
-        )
-
-        if loss < best_loss:
-            best_loss = loss
+        if current_loss < best_loss:
+            best_loss = current_loss
             best_angles = angles.copy()
 
-    predictions, probabilities = predict(
-        X_validation,
-        depth,
-        best_angles
-    )
-
-    accuracy = accuracy_score(
-        y_validation,
-        predictions
-    )
-
-    return (
-        accuracy,
-        best_loss,
-        best_angles
-    )
-
-
-def search_depths(
-    X_train,
-    y_train,
-    X_validation,
-    y_validation
-):
-    best_depth = None
-    best_accuracy = -1.0
-    best_angles = None
-
-    results = []
-
-    for depth in range(1, MAX_DEPTH + 1):
-
-        theoretical_branches = 2 ** depth
-
         print(
-            f"Depth {depth:4d} | "
-            f"Qubits {depth:4d} | "
-            f"Branches 2^{depth}"
+            f"Iteration "
+            f"{iteration + 1:2d}/{ITERATIONS} | "
+            f"Loss: {current_loss:.4f} | "
+            f"Best: {best_loss:.4f}"
         )
 
-        if depth > MAX_SIMULATION_DEPTH:
-            print(
-                "Simulation limit reached."
-            )
-            break
-
-        accuracy, loss, angles = train_depth(
-            X_train,
-            y_train,
-            X_validation,
-            y_validation,
-            depth
-        )
-
-        results.append(
-            (
-                depth,
-                accuracy,
-                loss
-            )
-        )
-
-        print(
-            f"Validation accuracy: "
-            f"{accuracy:.4f}"
-        )
-
-        if accuracy > best_accuracy:
-
-            best_accuracy = accuracy
-            best_depth = depth
-            best_angles = angles.copy()
-
-    return (
-        best_depth,
-        best_accuracy,
-        best_angles,
-        results
-    )
+    return best_angles, best_loss
 
 
 def main():
-
 
     print("HYBRID QUANTUM DECISION TREE")
 
@@ -277,82 +256,118 @@ def main():
         y_test
     ) = prepare_data(X, y)
 
-  
-    print(f"Samples : {len(X)}")
-    print(f"Features: {X.shape[1]}")
-    print("Classes : 0 and 1")
+    print(
+        f"\nSamples : {len(X)}"
+    )
 
-    print("Searching tree depths...")
-  
+    print(
+        f"Features: {X.shape[1]}"
+    )
 
-    (
-        best_depth,
-        best_accuracy,
-        best_angles,
-        results
-    ) = search_depths(
+    print(
+        "Classes : 0 and 1"
+    )
+
+    print(
+        f"\nTree depth : {DEPTH}"
+    )
+
+    print(
+        f"Tree qubits: {DEPTH}"
+    )
+
+    print(
+        f"H gates    : {DEPTH}"
+    )
+
+    print(
+        f"Branches   : {2 ** DEPTH}"
+    )
+
+    best_angles, best_loss = train(
         X_train,
-        y_train,
-        X_validation,
-        y_validation
+        y_train
     )
 
+    print("\nVALIDATION")
    
-    print("BEST QUANTUM TREE")
 
+    validation_predictions, validation_probabilities = predict(
+        X_validation,
+        best_angles
+    )
 
-    print(
-        f"Depth: {best_depth}"
+    validation_accuracy = accuracy_score(
+        y_validation,
+        validation_predictions
+    )
+
+    validation_loss = calculate_loss(
+        y_validation,
+        validation_probabilities
     )
 
     print(
-        f"Qubits: {best_depth}"
+        f"Loss     : {validation_loss:.4f}"
     )
 
     print(
-        f"H gates: {best_depth}"
+        f"Accuracy : {validation_accuracy:.4f}"
     )
 
-    print(
-        f"Theoretical branches: 2^{best_depth}"
-    )
+    print("\nFINAL TEST")
+  
 
-    print(
-        f"Validation accuracy: "
-        f"{best_accuracy:.4f}"
-    )
-
-    print("FINAL TEST")
-
-
-    predictions, probabilities = predict(
+    test_predictions, test_probabilities = predict(
         X_test,
-        best_depth,
         best_angles
     )
 
     test_accuracy = accuracy_score(
         y_test,
-        predictions
+        test_predictions
+    )
+
+    test_loss = calculate_loss(
+        y_test,
+        test_probabilities
     )
 
     print(
-        f"Test accuracy: "
-        f"{test_accuracy:.4f}"
+        f"Loss     : {test_loss:.4f}"
     )
 
-    print()
-    print("Sample predictions:")
+    print(
+        f"Accuracy : {test_accuracy:.4f}"
+    )
+
+    print("\nLEARNED ANGLES")
+ 
+
+    print(
+        np.round(
+            best_angles,
+            4
+        )
+    )
+
+    print("\nSAMPLE PREDICTIONS")
+    
 
     for i in range(
         min(10, len(X_test))
     ):
         print(
             f"{i + 1:2d} | "
-            f"P(1) = {probabilities[i]:.3f} | "
-            f"Prediction = {predictions[i]} | "
-            f"Actual = {y_test[i]}"
+            f"P(1) = "
+            f"{test_probabilities[i]:.3f} | "
+            f"Prediction = "
+            f"{test_predictions[i]} | "
+            f"Actual = "
+            f"{y_test[i]}"
         )
+
+    print("\nTraining complete.")
 
 
 if __name__ == "__main__":

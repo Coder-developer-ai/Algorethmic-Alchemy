@@ -16,9 +16,9 @@ operation Main() : Result {
         0.8
     ];
 
-    QuantumTree(
+    return QuantumTree(
         depth,
         features,
         angles
-    )
+    );
 }
